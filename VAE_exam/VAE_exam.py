@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from torch.distributions.continuous_bernoulli import ContinuousBernoulli
 import os
-os.chdir('/home/zhi/data/MLSP/VAE_exam')
+os.chdir('/home/zhi/data/MLSP/PML_2024/VAE_exam')
 
 torch.manual_seed(1)
 device = torch.device("cpu")
@@ -25,50 +25,102 @@ test_loader = torch.utils.data.DataLoader(
 
 def cont_bern_log_norm(lam, l_lim=0.49, u_lim=0.51):
     cut_lam = torch.where(torch.logical_or(torch.less(lam, l_lim), torch.greater(lam, u_lim)), lam, l_lim * torch.ones_like(lam))
-    if (torch.log(torch.abs(2.0 * torch.atanh(1 - 2.0 * cut_lam))) == torch.log(torch.abs(1 - 2.0 * cut_lam)) ).all():
-        print("1 inf")
-    if (torch.log(torch.abs(1 - 2.0 * cut_lam)) == 0).all():
-        print("2 inf")
     log_norm = torch.log(torch.abs(2.0 * torch.atanh(1 - 2.0 * cut_lam))) - torch.log(torch.abs(1 - 2.0 * cut_lam))
     taylor = torch.log(torch.tensor(2.0)) + torch.tensor(4.0 / 3.0 )* (lam - 0.5).pow(2) + torch.tensor(104.0 / 45.0) * (lam - 0.5).pow(4)
     logc = torch.where(torch.logical_or(torch.less(lam, l_lim), torch.greater(lam, u_lim)), log_norm, taylor)
     return logc        
 
-def conti_berno(y, x):
-    # x: input, z: reconstruct variable
-    # print('constant', cont_bern_log_norm(y)[0][0])
-    BCE_loss = torch.mean(torch.sum(x*torch.log(y) + (1-x)*torch.log(1-y) + cont_bern_log_norm(y), axis = 0))
-    #BCE = F.binary_cross_entropy(y, x.view(-1, 784), reduction='sum')
-    #logC = cont_bern_log_norm(y).sum()
-    return -BCE_loss
+# def conti_berno(y, x):
+#     # x: input, z: reconstruct variable
+#     # print('constant', cont_bern_log_norm(y)[0][0])
+#     BCE_loss = torch.mean(torch.sum(x*torch.log(y) + (1-x)*torch.log(1-y) + cont_bern_log_norm(y), axis = 0))
+#     #BCE = F.binary_cross_entropy(y, x.view(-1, 784), reduction='sum')
+#     #logC = cont_bern_log_norm(y).sum()
+#     return -BCE_loss
+
+def sumlogC(y , eps = 1e-5):
+    y = torch.clamp(y, eps, 1.-eps) 
+    mask = torch.abs(y - 0.5).ge(eps)
+    far = torch.masked_select(y, mask)
+    close = torch.masked_select(y, ~mask)
+    far_values =  torch.log((torch.log(1. - far) - torch.log(far)).div(1. - 2. * far))
+    close_values = torch.log(torch.tensor((2.))) + torch.log(1. + torch.pow( 1. - 2. * close, 2)/3. )
+    return far_values.sum() + close_values.sum()
+
+# class VAE(nn.Module):
+#     def __init__(self):
+#         super(VAE, self).__init__()
+
+#         self.fc1 = nn.Linear(784, 300)
+#         self.fc21 = nn.Linear(300, 2)
+#         self.fc22 = nn.Linear(300, 2)
+#         self.fc3 = nn.Linear(2, 300)
+#         self.fc4 = nn.Linear(300, 784)
+
+#     def encode(self, x):
+#         h1 = F.relu(self.fc1(x))
+#         return self.fc21(h1), self.fc22(h1)
+
+#     def reparameterize(self, mu, logvar):
+#         std = torch.exp(0.5*logvar)
+#         eps = torch.randn_like(std)
+#         return mu + eps*std
+
+#     def decode(self, z):
+#         h3 = F.relu(self.fc3(z))
+#         return torch.sigmoid(self.fc4(h3))
+
+#     def forward(self, x):
+#         mu, logvar = self.encode(x.view(-1, 784))
+#         z = self.reparameterize(mu, logvar)
+#         return self.decode(z), mu, logvar
 
 class VAE(nn.Module):
     def __init__(self):
         super(VAE, self).__init__()
-
-        self.fc1 = nn.Linear(784, 300)
-        self.fc21 = nn.Linear(300, 2)
-        self.fc22 = nn.Linear(300, 2)
-        self.fc3 = nn.Linear(2, 300)
-        self.fc4 = nn.Linear(300, 784)
+        
+        # Encoder layers
+        self.fc1 = nn.Linear(784, 500)
+        self.fc2 = nn.Linear(500, 500)
+        self.fc21 = nn.Linear(500, 20)
+        self.fc22 = nn.Linear(500, 20)
+        
+        # Decoder layers
+        self.fc3 = nn.Linear(20, 500)
+        self.fc4 = nn.Linear(500, 500)
+        self.fc5 = nn.Linear(500, 784)
+        
+        # Dropout Layers
+        self.dropout1 = nn.Dropout(0.1)
+        self.dropout2 = nn.Dropout(0.1)
+        self.dropout3 = nn.Dropout(0.1)
+        self.dropout4 = nn.Dropout(0.1)
 
     def encode(self, x):
+        #Recognition function
         h1 = F.relu(self.fc1(x))
-        return self.fc21(h1), self.fc22(h1)
+        h1 = self.dropout1(h1)
+        h2 = F.relu(self.fc2(h1))
+        h2 = self.dropout2(h2)
+        return self.fc21(h2), F.softplus(self.fc22(h2)) 
 
-    def reparameterize(self, mu, logvar):
-        std = torch.exp(0.5*logvar)
+    def reparameterize(self, mu, std):
         eps = torch.randn_like(std)
-        return mu + eps*std
+        return eps.mul(std).add_(mu)
 
     def decode(self, z):
+        #Likelihood function
         h3 = F.relu(self.fc3(z))
-        return torch.sigmoid(self.fc4(h3))
+        h3 = self.dropout3(h3)
+        h4 = F.relu(self.fc4(h3))
+        h4 = self.dropout4(h4)
+        return torch.sigmoid( self.fc5(h4) ) # Gaussian mean
 
     def forward(self, x):
         mu, logvar = self.encode(x.view(-1, 784))
         z = self.reparameterize(mu, logvar)
-        return self.decode(z), mu, logvar
+        # Return decoding, mean and logvar
+        return self.decode(z), mu, logvar 
 
 
 model = VAE().to(device)
@@ -76,8 +128,7 @@ optimizer = optim.Adam(model.parameters(), lr=1e-3)
 
 # Reconstruction + KL divergence losses summed over all elements and batch
 def loss_function(recon_x, x, mu, logvar):
-    BCE_berno = conti_berno(recon_x, x.view(-1, 784))
-    print(BCE_berno)
+    BCE_berno = F.binary_cross_entropy(recon_x, x.view(-1, 784), reduction='sum') + sumlogC(recon_x)
     # see Appendix B from VAE paper:
     # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
     # https://arxiv.org/abs/1312.6114
@@ -131,9 +182,9 @@ if __name__ == "__main__":
         ry = train(epoch)
         test(epoch)
         with torch.no_grad():
-            sample = torch.randn(64, 2).to(device)
+            sample = torch.randn(128, 20).to(device)
             sample = model.decode(sample).cpu()
-            save_image(sample.view(64, 1, 28, 28),
+            save_image(sample.view(128, 1, 28, 28),
                        'results/sample_' + str(epoch) + '.png')
 
 # def plot_latent(model, data, num_batches=128):
