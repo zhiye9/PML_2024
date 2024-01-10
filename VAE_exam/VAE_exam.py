@@ -47,81 +47,33 @@ def sumlogC(y , eps = 1e-5):
     close_values = torch.log(torch.tensor((2.))) + torch.log(1. + torch.pow( 1. - 2. * close, 2)/3. )
     return far_values.sum() + close_values.sum()
 
-# class VAE(nn.Module):
-#     def __init__(self):
-#         super(VAE, self).__init__()
-
-#         self.fc1 = nn.Linear(784, 300)
-#         self.fc21 = nn.Linear(300, 2)
-#         self.fc22 = nn.Linear(300, 2)
-#         self.fc3 = nn.Linear(2, 300)
-#         self.fc4 = nn.Linear(300, 784)
-
-#     def encode(self, x):
-#         h1 = F.relu(self.fc1(x))
-#         return self.fc21(h1), self.fc22(h1)
-
-#     def reparameterize(self, mu, logvar):
-#         std = torch.exp(0.5*logvar)
-#         eps = torch.randn_like(std)
-#         return mu + eps*std
-
-#     def decode(self, z):
-#         h3 = F.relu(self.fc3(z))
-#         return torch.sigmoid(self.fc4(h3))
-
-#     def forward(self, x):
-#         mu, logvar = self.encode(x.view(-1, 784))
-#         z = self.reparameterize(mu, logvar)
-#         return self.decode(z), mu, logvar
-
 class VAE(nn.Module):
     def __init__(self):
         super(VAE, self).__init__()
-        
-        # Encoder layers
-        self.fc1 = nn.Linear(784, 500)
-        self.fc2 = nn.Linear(500, 500)
-        self.fc21 = nn.Linear(500, 20)
-        self.fc22 = nn.Linear(500, 20)
-        
-        # Decoder layers
-        self.fc3 = nn.Linear(20, 500)
-        self.fc4 = nn.Linear(500, 500)
-        self.fc5 = nn.Linear(500, 784)
-        
-        # Dropout Layers
-        self.dropout1 = nn.Dropout(0.1)
-        self.dropout2 = nn.Dropout(0.1)
-        self.dropout3 = nn.Dropout(0.1)
-        self.dropout4 = nn.Dropout(0.1)
+
+        self.fc1 = nn.Linear(784, 300)
+        self.fc21 = nn.Linear(300, 20)
+        self.fc22 = nn.Linear(300, 20)
+        self.fc3 = nn.Linear(20, 300)
+        self.fc4 = nn.Linear(300, 784)
 
     def encode(self, x):
-        #Recognition function
         h1 = F.relu(self.fc1(x))
-        h1 = self.dropout1(h1)
-        h2 = F.relu(self.fc2(h1))
-        h2 = self.dropout2(h2)
-        return self.fc21(h2), F.softplus(self.fc22(h2)) 
+        return self.fc21(h1), self.fc22(h1)
 
-    def reparameterize(self, mu, std):
+    def reparameterize(self, mu, logvar):
+        std = torch.exp(0.5*logvar)
         eps = torch.randn_like(std)
-        return eps.mul(std).add_(mu)
+        return mu + eps*std
 
     def decode(self, z):
-        #Likelihood function
         h3 = F.relu(self.fc3(z))
-        h3 = self.dropout3(h3)
-        h4 = F.relu(self.fc4(h3))
-        h4 = self.dropout4(h4)
-        return torch.sigmoid( self.fc5(h4) ) # Gaussian mean
+        return torch.sigmoid(self.fc4(h3))
 
     def forward(self, x):
         mu, logvar = self.encode(x.view(-1, 784))
         z = self.reparameterize(mu, logvar)
-        # Return decoding, mean and logvar
-        return self.decode(z), mu, logvar 
-
+        return self.decode(z), mu, logvar
 
 model = VAE().to(device)
 optimizer = optim.Adam(model.parameters(), lr=1e-3)
@@ -136,7 +88,6 @@ def loss_function(recon_x, x, mu, logvar):
     KLD = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
     return KLD + BCE_berno
-
 
 def train(epoch):
     model.train()
@@ -157,7 +108,6 @@ def train(epoch):
 
     print('====> Epoch: {} Average loss: {:.4f}'.format(
           epoch, train_loss / len(train_loader.dataset)))
-
 
 def test(epoch):
     model.eval()
@@ -182,9 +132,9 @@ if __name__ == "__main__":
         ry = train(epoch)
         test(epoch)
         with torch.no_grad():
-            sample = torch.randn(128, 20).to(device)
+            sample = torch.randn(64, 20).to(device)
             sample = model.decode(sample).cpu()
-            save_image(sample.view(128, 1, 28, 28),
+            save_image(sample.view(64, 1, 28, 28),
                        'results/sample_' + str(epoch) + '.png')
 
 # def plot_latent(model, data, num_batches=128):
